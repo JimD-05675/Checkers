@@ -2,77 +2,47 @@ package com.example.checkers;
 
 import android.app.Activity;
 //import android.content.Intent;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-//import android.content.Context;
 import android.content.SharedPreferences;
-import android.os.Build;
 import android.os.Bundle;
-//import android.os.Vibrator;
-//import android.util.Log;
-//import android.support.annotation.NonNull;
-//import android.support.v4.content.Loader;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.util.Log;
 import android.view.*;
 import android.widget.*;
 import android.graphics.Color;
 
-//import java.util.Calendar;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.Arrays;
+import java.util.UUID;
 
 
 public class MainActivity extends Activity { //implements OnClickListener, OnTouchListener{
+    int sleeptime=1000;
+    int sleeprepeats=30;
     public ImageView[] board = new ImageView[64];
 //    public View viewcell=board[0];
     public Integer[] bdvals = new Integer [64];
-    // 0=empty 1==redman 2=whtman 3=redking 4=whtking  - add 10 for yellow boarder
-
-    protected TextView redscore;  //=findViewById(R.id.score);
-    protected TextView whitescore; //=findViewById(R.id.white_score);
-    protected TextView over;
-    protected TextView PushTitle;
-    protected TextView PushDesc;
-
-    //protected EditText debugview;
-
-    int i=0;    //int j=0;
+    // 0=empty 1==redman 2=whtman 3=redking 4=whtking  - add 5 for yellow boarder
+    protected TextView status;
+    protected Button btnRefresh;
+ //   protected EditText debugview;
+    int i=0;int k=0;
+    int nbrplayers=2;
     int player =1;  //player -  1=red 2=white   whose turn is it
     int step=0;  //steps in one turn 0=ready 1=choose mover 2=choose destination
     int start=0,midpt=0;
     int scorered=0, scorewhite=0;
-
-    // JimD additional code, for Push Notification Sept 13, 2023 from Balal YouTube channel.
-    // These three steps:
-    //     1. specify a push notification channel ID
-    //     2. specify a push notification channel name
-    //     3. specify a push notification channel description (with manager)
-    //
-    private static final String Channel_ID = "Checkers game ID 50009260";
-    private static final String Channel_Name = "Checkers DM JD";
-    private static final String Channel_Description = "using notification, to indicate it's your turn";
+    String uniqueID;
+    Boolean debug=false;
+    String url="http://dmarmon.com/fueltrak/checkers.php?q=";
+    private Thread loop;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
-        // JimD additional code, for Push Notification Sept 13, 2023 from Balal YouTube channel.
-        // These three steps:
-        //     1. specify a push notification channel ID
-        if(Build.VERSION.SDK_INT>=Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel (Channel_ID, Channel_Name, NotificationManager.IMPORTANCE_DEFAULT);
-            channel.setDescription(Channel_Description);
-            NotificationManager manager = getSystemService(NotificationManager.class);
-            manager.createNotificationChannel(channel);
-        }
-        //     2. specify a push notification channel name
-        //
-
-        //     3. specify a push notification channel description (with manager)
-        //
-
-
         board[0]=findViewById(R.id.board0);
         board[1]=findViewById(R.id.board1);
         board[2]=findViewById(R.id.board2);
@@ -139,70 +109,99 @@ public class MainActivity extends Activity { //implements OnClickListener, OnTou
         board[63]=findViewById(R.id.board63);
         int i=-1;
         while(i<63){++i;
-            board[i].setOnClickListener(new View.OnClickListener() {
-                public void onClick(View v) {turn(v);}});
+            board[i].setOnClickListener(v -> turn(v));
         }
-        Button btnRefresh=(Button) findViewById(R.id.btnRefresh);
-        btnRefresh.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view)  {refreshBoard();}
-        });
-        Button debug= findViewById(R.id.debug);
-        debug.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                for(int cell=0;cell<64;cell++) {
-                    Log.d("bdvals ", String.valueOf(cell)+" "+bdvals[cell]);
-                }
-            }
-        });
-        EditText debugview=findViewById(R.id.debugview);
-        debugview.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence charSequence, int i, int i1, int i2) {}
-            @Override
-            public void onTextChanged(CharSequence charSequence, int i, int i1, int i2) {}
-            @Override
-            public void afterTextChanged(Editable editable) {
-                Log.d("debugview", "  str="+String.valueOf(editable));
-                int temp=Integer.parseInt("0"+String.valueOf(editable));
-                Log.d("debug","player "+player+" bdval "+bdvals(temp));
-                movesFrom(board[temp]);
-            }
-        });
-//        debugview.addTextChangedListener(TextWatcher());
-        redscore=(TextView) findViewById(R.id.red_score);
-        whitescore=(TextView) findViewById(R.id.white_score);
-        over=findViewById(R.id.over);
-        PushTitle=findViewById(R.id.PushTitle);
-        PushDesc=findViewById(R.id.message);
-
-//        debug.setChecked(true);
+        btnRefresh=(Button) findViewById(R.id.btnRefresh);
+        btnRefresh.setOnClickListener(view -> refreshBoard());
+        uniqueID= UUID.randomUUID().toString().substring(0,8);
+        status=findViewById(R.id.status);
     }
     // ------------ end on create
     public void refreshBoard(){
-        for(i=0;i<64;i++){
-            if((i+(row(i)))%2==0){
-                board[i].setBackgroundColor(Color.BLACK);
-                if(i<24){board[i].setImageDrawable(getResources().getDrawable(R.drawable._1redman));bdvals[i]=1;}
-                else if(i>39){board[i].setImageDrawable(getResources().getDrawable(R.drawable._2whiteman));bdvals[i]=2;}
-                else{board[i].setImageDrawable(null);bdvals[i]=0;}}
-            else{board[i].setBackgroundColor(Color.RED);bdvals[i]=0;}
+        if(btnRefresh.getText()=="ASK") {
+            btnRefresh.setText("WAIT");
+            status.setText("polling");
+            sendBoard(1);  //no chg board but polling
+            return;
+        }else if(btnRefresh.getText()=="PLAY" ||btnRefresh.getText()=="WAIT") {
+            return;  // ignore click
+        }else{  //button says START
+            for(i=0;i<64;i++){
+                if((i+(row(i)))%2==0){
+                    board[i].setBackgroundColor(Color.BLACK);
+                    if(i<24){board[i].setImageDrawable(getResources().getDrawable(R.drawable._1redman));bdvals[i]=1;}
+                    else if(i>39){board[i].setImageDrawable(getResources().getDrawable(R.drawable._2whiteman));bdvals[i]=2;}
+                    else{board[i].setImageDrawable(null);bdvals[i]=0;}}
+                else{board[i].setBackgroundColor(Color.RED);bdvals[i]=0;}
+            }
+        if(nbrplayers>1) {
+            String bdstring =Arrays.toString(bdvals).replace(" ","");
+            Thread zero = new Thread() {
+                public void run() {
+                    String response = sendRecv(url + "0|" + uniqueID + "|"+bdstring);
+                    runOnUiThread(() -> {
+                        Log.d("in zero thread", response);
+                        if (response.equals("wait")) { //opponent has started but not finished turn
+                            if (btnRefresh.getText() == "START") {
+                                btnRefresh.setText("WAIT");
+                                status.setText("other start only");
+                                //jump out - don't go to turn
+                            }
+                        } else if(response.equals("play")){ //you have started - now take your turn
+                            btnRefresh.setText("PLAY");
+                            status.setText("initial turn");
+                        }else{  //opponent has started and finished first turn - install board and take turn
+                            player=2;
+                            overlayBoard(response);
+                            btnRefresh.setText("PLAY");
+                            status.setText("second turn");
+                        }
+                        step = 0;
+                        turn(board[0]);
+                    });
+                }
+            };
+            zero.start();
+        }else {  //solitaire
+            scorered = 0;
+            scorewhite = 0;
+            player = 1;  //1=red  2=white
+            step = 0;
+            turn(board[0]);
         }
-        scorered=0; scorewhite=0;
-        player=1;  //1=red  2=white
-        step=0;
-        turn(board[0]);
+    }
+    }
+    public void overlayBoard(String bd){
+        if(bd.length()>9){
+            bd=bd.replace("[","").replace("]","");
+            String[] bdarray=bd.split(",");
+            for(int j=0;j<64;j++){  //turn string array into integer array
+                bdvals[j]=Integer.parseInt(bdarray[j]);}
+        }
+    //    Integer refbdvals[]={1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 2, 0, 2, 2, 0, 2, 0, 2, 0, 2, 0, 0, 2, 0, 2, 0, 2, 0, 2};
+    //    bdvals=refbdvals;
+        for(i=0;i<64;i++){
+            if(bdvals[i]==0){board[i].setImageDrawable(null);}
+            if(bdvals[i]==1){board[i].setImageDrawable(getResources().getDrawable((R.drawable._1redman)));}
+            if(bdvals[i]==2){board[i].setImageDrawable(getResources().getDrawable((R.drawable._2whiteman)));}
+            if(bdvals[i]==3){board[i].setImageDrawable(getResources().getDrawable((R.drawable._3redking)));}
+            if(bdvals[i]==4){board[i].setImageDrawable(getResources().getDrawable((R.drawable._4whiteking)));}
+            if(bdvals[i]==5){board[i].setImageDrawable(getResources().getDrawable((R.drawable._5yellow)));}
+            if(bdvals[i]==6){board[i].setImageDrawable(getResources().getDrawable((R.drawable._6redmanyellow)));}
+            if(bdvals[i]==7){board[i].setImageDrawable(getResources().getDrawable((R.drawable._7whitemanyellow)));}
+            if(bdvals[i]==8){board[i].setImageDrawable(getResources().getDrawable((R.drawable._8redkingyellow)));}
+            if(bdvals[i]==9){board[i].setImageDrawable(getResources().getDrawable((R.drawable._9whitekingyellow)));}
+        }
     }
     public void turn(View v){ //steps in one turn 0=ready 1=choose mover 2=choose destination
         int cell= Integer.parseInt(bdnbr(v));
-        if(bdvals(cell)<10 && step>0){Log.d("turn - error not high ",String.valueOf(cell)+" "+bdvals(cell));return;}
-        Log.v("turn begin step--------"," beginning step="+String.valueOf(step)+" start "+start+" cell "+cell);
+        if(bdvals(cell)<5 && step>0){Log.d("turn - error not high ", cell +" "+bdvals(cell));return;}
+        Log.v("turn begin step--------"," beginning step="+ step +" start "+start+" cell "+cell);
 //move or jump
         if (step==2){  //move man to this cell - remove man from previous cell
-            Log.d("step=2   ","move this man----from "+start+" to "+String.valueOf(cell));
+            Log.d("step=2   ","move this man----from "+start+" to "+ cell);
             int bdvalue=bdvals(start);
-            if((row(cell)==0 || row(cell)==7)&& bdvalue<3){bdvalue=bdvalue+2;}
+            if((row(cell)==0 || row(cell)==7)&& bdvalue<3){bdvalue=bdvalue+2;} //make king
             if(bdvalue==1){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._1redman));}
             if(bdvalue==2){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._2whiteman));}
             if(bdvalue==3){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._3redking));}
@@ -214,7 +213,6 @@ public class MainActivity extends Activity { //implements OnClickListener, OnTou
                 int jumped=(start+cell)/2;
                 board[jumped].setImageDrawable(null); //delete the opponent
                 bdvals[jumped]=0;
-                score(1);
             }
             if(Math.abs(row(start)-row(cell))==4 || Math.abs(row(start)-row(cell))==0){ //double jump
                 int jumped=((start+midpt)/2);  //midpt = start of second jump
@@ -223,65 +221,82 @@ public class MainActivity extends Activity { //implements OnClickListener, OnTou
                 jumped=((midpt+cell)/2);
                 board[jumped].setImageDrawable(null); //delete the opponent
                 bdvals[jumped]=0;
-                score(2);
             }
             clearhighlights();
-            player =player%2+1;
-            step=0;
+            if(nbrplayers>1){
+                btnRefresh.setText("WAIT");
+                status.setText("not your turn");
+                sendBoard(0);
+            }else{
+/*                if(debug){
+                    //write the board even for solitaire
+                String bdstring =Arrays.toString(bdvals).replace(" ","");
+                Thread solo = new Thread() {
+                    public void run() {
+                        String response = sendRecv(url + "1|" + uniqueID + "|" + bdstring);
+                    }
+                }; solo.start();} */
+                player =player%2+1;
+                step=0;
+            }
+            Log.d("step=2   ","after sendBoard"+start+" to "+ cell);
         }
 
         if (step==1) {  //click on man to move; highlight possible destinations
             start=cell;
-            Log.v("step=1--------", "-----------------------start-"+String.valueOf(start));
+            Log.v("step=1--------", "-----------------------start-"+ start);
             step++;
-            if (bdvals[cell] >= 10) {
+            if (bdvals[cell] >= 5) {
                 clearhighlights();
                 for(int poss:movesFrom(v)){
                     if(poss>=0) { //Log.d("possmove  ",bdnbr(v));
-                        board[poss].setImageDrawable(getResources().getDrawable(R.drawable._10yellow));
-                        bdvals[poss] = 10;
+                        board[poss].setImageDrawable(getResources().getDrawable(R.drawable._5yellow));
+                        bdvals[poss] = 5;
                         Log.d("possmoves yellow","cell"+poss);
                     }
                 }
             }
+            Log.d("turn","end of step 1");
         }
 
         if(step==0){  //highlight possible movers
-            Log.d("step=0   ","highlight movers--------player "+String.valueOf(player));
+            Log.d("step=0   ","highlight movers--------player "+ player);
             int cntmoves=0;
             for (cell=0;cell<64;cell++){  //loop through board - cell is man
                 if(bdvals[cell]>0 && bdvals[cell]%2== player%2) {  //this cell contains a man currently on his turn
-                    Log.d("player's man -","can move?  cell="+String.valueOf(cell)+" bdval="+String.valueOf(bdvals[cell])+" player"+ player);
+//                    Log.d("turn 0 ","can move?  cell="+String.valueOf(cell)+" bdval="+String.valueOf(bdvals[cell])+" player"+ player);
                     if(movesFrom(board[cell])[0]>=0){  //who can move
-                        Log.d("   yes - highlight", " cell="+cell +" bdval="+bdvals[cell]);
-                        if(bdvals[cell]==1){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._11redmanyellow));}
-                        if(bdvals[cell]==2){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._12whitemanyellow));}
-                        if(bdvals[cell]==3){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._13redkingyellow));}
-                        if(bdvals[cell]==4){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._14whitekingyellow));}
-                        bdvals[cell]=bdvals[cell]+10;
+//                        Log.d("   yes - highlight", " cell="+cell +" bdval="+bdvals[cell]);
+                        bdvals[cell]=bdvals[cell]+5;
+                        if(bdvals[cell]==6){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._6redmanyellow));}
+                        if(bdvals[cell]==7){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._7whitemanyellow));}
+                        if(bdvals[cell]==8){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._8redkingyellow));}
+                        if(bdvals[cell]==9){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._9whitekingyellow));}
                         cntmoves++;
                     }
                 }
             }
-            if(cntmoves==0){over.setText("GAME OVER");}
-            step++;  //next step actually move
+            if(cntmoves==0){
+                status.setText("GAME LOST");
+                btnRefresh.setText("START");
+                String bdstring =Arrays.toString(bdvals).replace(" ","");
+                Thread zero = new Thread() {
+                    public void run() {
+                        String response = sendRecv(url + "-1|" + uniqueID + "|"+bdstring);
+                        Log.d("turn step0","negative one"+response);
+                    }
+                };
+                zero.start();
+            }
+            step=1;  //next step actually move
             Log.d("turn","-------------end step=0  "+player);
-        }
-    }
-    public void score(int scores){
-        if(player==1){
-            scorered=scorered+scores;
-            redscore.setText(String.valueOf(scorered));
-        }else{
-            scorewhite=scorewhite+scores;
-            whitescore.setText(String.valueOf(scorewhite));
         }
     }
     public void clearhighlights(){
         for(i=0;i<64;i++){int cell=i;
-            if(bdvals[cell]>=10){
-                Log.d("clearhighlights",cell+" "+bdvals[cell]);
-                bdvals[cell]=bdvals[cell]%10;
+            if(bdvals[cell]>=5){
+//                Log.d("clearhighlights",cell+" "+bdvals[cell]);
+                bdvals[cell]=bdvals[cell]%5;
                 if(bdvals[cell]==1){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._1redman));}
                 if(bdvals[cell]==2){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._2whiteman));}
                 if(bdvals[cell]==3){board[cell].setImageDrawable(getResources().getDrawable(R.drawable._3redking));}
@@ -292,15 +307,15 @@ public class MainActivity extends Activity { //implements OnClickListener, OnTou
     }
 
     public int[] movesFrom(View v){  //returns an array of possible destinations
-        int dest=0,dest2=0,dest3=0,dest4=0;
-        int[] ret= {-1,-1,-1,-1};
+        int dest,dest2,dest3,dest4;
+        int[] ret= {-1,-1,-1,-1,-1,-1};
         int retptr=0;
         int cell=Integer.parseInt(bdnbr(v));
         int[] sides={7,9};  //right and left
 //        int dir=0;
         int dirx=3-(player*2);  //direction of play 1=south (Red) -1=north (White)
         int[] dirarray={dirx,-dirx};
-        if(bdvals(cell)<3){dirarray[1]=0;}
+        if(bdvals(cell)<3){dirarray[1]=0;}  //if not king, only one dir
 
         for(int dir:dirarray) {  if(dir==0){break;}
             for (int side : sides) {
@@ -319,7 +334,7 @@ public class MainActivity extends Activity { //implements OnClickListener, OnTou
                         for(int dir2:dirarray) {if (dir2 == 0) {break;}
                             for (int side2 : sides) {
                                 dest3 = jump(dest2, side2, dir2);
-                                if (bdvals(dest3)%2 == (1 + player % 2)) { // occupied by opponent
+                                if (bdvals(dest3)>0 &&bdvals(dest3)%2 == (1 + player) % 2) { // occupied by opponent
                                     dest4 = jump(dest3, side2, dir2);
                                     if (bdvals(dest4) == 0) { //empty spot to land
                                         if (ret[retptr - 1] == midpt) {
@@ -337,8 +352,8 @@ public class MainActivity extends Activity { //implements OnClickListener, OnTou
                 }
             }
         }
-        Log.d("  moveFrom dest ",String.valueOf(dest2)+ dest3 + dest4+" cell="+cell+" bdval="+bdvals(cell));
-        Log.d("  moveFrom ret ",String.valueOf(ret[0])+ ret[1] + ret[2]+ret[3]);
+//        Log.d("  moveFrom dest ",String.valueOf(dest2)+ dest3 + dest4+" cell="+cell+" bdval="+bdvals(cell));
+//        Log.d("  moveFrom ret ",String.valueOf(ret[0])+ ret[1] + ret[2]+ret[3]);
         return ret;
     }
     public int jump(int cell, int side, int dir){ //inputs starting cell, side (left or right), dir (north or south)
@@ -346,33 +361,116 @@ public class MainActivity extends Activity { //implements OnClickListener, OnTou
         dest=row(dest)==row(cell)+dir?dest:-1;  //must be in next row
         return dest; //output is cell after move or -1 if move is off the board
     }
-    public String bdnbr(View v){
+    public void sendBoard(int flag){  //wrap communication with server in the polling logic - will wait
+        Log.d("before Thread","the turn finished pushed "+uniqueID);
+        loop=new Thread() {
+            public void run() {
+                int i=flag;  //flag=0 write board and loop for answer  =1 ASK = restart looping without saving board
+                while (i++ < sleeprepeats) {
+                    String bdstring = Arrays.toString(bdvals).replace(" ","");
+                    String output= i +"|"+uniqueID+"|"+bdstring;
+                    String response = sendRecv("http://dmarmon.com/fueltrak/checkers.php?q=\"" + output + "\"");
+                    response=response.replace(" ","");
+                    Log.d("inThread2","sent    ="+bdstring);
+                    Log.d("inThread2","response="+response+" loop="+i);
+                     if(response.equals("stop")) { //game over
+                         runOnUiThread(() -> {  //new input - ready btn
+                            btnRefresh.setText("START");
+                            status.setText("YOU WON");
+                         });
+                         i=998;
+                         loop.interrupt();
+                    }
+                    else if(response.length()<5){
+                        Log.d("inThread","response is too short"+response);}
+                    else if (!response.equals(bdstring)) {  //.replace(" ","")
+// polling has returned an updated board - install and take turn
+                        response=response.replace("[","").replace("]","");
+                        String[] bdarray=response.split(",");
+                        for(int j=0;j<64;j++){  //turn string array into integer array
+                            bdvals[j]=Integer.parseInt(bdarray[j]);}
+                        Log.d("in thread4 ", "input=" + uniqueID + " " + i + " response=" + Arrays.toString(bdvals).replace(" ",""));
+                        i=999;  //stop looping
+                        runOnUiThread(() -> {  //new input - ready btn
+                            overlayBoard("");
+                            Log.d("overlayBoard","");
+                            status.setText("now your turn "+player);
+                            btnRefresh.setText("PLAY");
+                            step=0;
+                            turn(board[1]);
+                        });
+                        loop.interrupt();
+                    }
+                    else{ //no change - wait and try again while loop
+                        try{
+                            Thread.sleep(sleeptime);
+                            Log.d("after sleep","idx.in.out "+i+response+"|"+output);
+                        } catch (InterruptedException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }  //end of while loop - timeout
+                Log.d("end loop","idx="+i);
+                if(i<900) {  //not 999=got new board
+                    runOnUiThread(() -> {  //new input - ready btn
+                        status.setText("OPPONENT delayed");
+//                                btnRefresh.setBackgroundColor(Color.BLUE);
+                        btnRefresh.setText("ASK");
+                    });
+                }
+            }
+        };
+        loop.start();
+        status.setText("WAIT end thread");
+//        loop.interrupt();
+        Log.d("after thread","end of routine - push again?");
+
+    }
+    public String sendRecv(String urlstr){
+        String response="";
+        Log.d("thread sendrecv",urlstr);
+        try {
+            URL url = new URL(urlstr);
+            HttpURLConnection http=(HttpURLConnection) url.openConnection();
+            http.connect();
+            InputStream is = http.getInputStream();
+
+            // Get the response
+            BufferedReader rd = new BufferedReader(new InputStreamReader(is));
+            response=rd.readLine();
+//            Log.d("sendRecv",urlstr+" response= "+response);
+        }
+        catch (Exception e)	{
+//            Exception j=e;
+//            dncount=999;
+            Log.d("conn thread sendrecv",e.toString());
+            Log.d("sendrecv2",urlstr);
+        }
+        return response;
+    }
+    public String bdnbr(View v){  //given view, returns index in board
         String bdid=v.getResources().getResourceName(v.getId());
-        return bdid.substring(29,bdid.length());
+        return bdid.substring(29);
     }
     int bdvals(int cell){
         if(cell>=0 && cell<64){ //Log.d("bdvals",String.valueOf(cell)+" "+bdvals[cell]);
             return bdvals[cell];}
         else{return cell;}
     }
-    public int row(int cell){return cell/8;}
-//    public int col(int cell){return cell%8;}
-
-    public boolean black(int cell){
-        int row=cell/8;
-        return (cell+row)%2==0;
+    public int row(int cell){
+        return cell/8;
     }
-    public void paint(int cell){}
-    //    public int cell;
+
+
     public void onPause(){
         super.onPause();
         SharedPreferences MyPref = getSharedPreferences("chk",0);
         SharedPreferences.Editor ed = MyPref.edit();
-        int i=0;
-        while(i<64){Log.d("onPause",String.valueOf(i)+" "+String.valueOf(bdvals[i]));
-            ed.putInt("board"+String.valueOf(i), bdvals[i]); i++;
+        int i=0;Log.d("onPause", i +" "+ bdvals[i]);
+        while(i<64){
+            ed.putInt("board"+ i, bdvals[i]); i++;
         }
-        ed.putInt("invert",invert);
+        ed.putInt("player",player);
         ed.apply();
     }
     int invert=0;
@@ -383,9 +481,8 @@ public class MainActivity extends Activity { //implements OnClickListener, OnTou
         while(i<64){temp=temp+MyPref.getInt("board"+i++, 0);}
         // if zero preferences create new board
         if(temp==0){ i=0; while(i<16){bdvals[i]=++i%64;}}
-        else{ i=0; while(i<64){bdvals[i]=MyPref.getInt("board"+i++, 0);}}
-        i=-1;
-        while(i<63){++i;  paint(i);}
+        else{ i=0; while(i<64){bdvals[i]=MyPref.getInt("board"+i++, 0);
+            Log.d("onResume",String.valueOf(bdvals[63]));}}
         invert=MyPref.getInt("invert",1);
     }
     public boolean onCreateOptionsMenu(Menu menu) {
@@ -394,15 +491,14 @@ public class MainActivity extends Activity { //implements OnClickListener, OnTou
         return true;
     }
     public boolean onPrepareOptionsMenu(final Menu menu){
-        menu.findItem(1).setTitle("Invert "+invert%15+">"+(16-invert)%15);
+        menu.findItem(1).setTitle("NbrPlayers "+nbrplayers+">"+(3-nbrplayers));
         return true;
     }
     public boolean onOptionsItemSelected(MenuItem item) {
-//   	switch (item.getItemId()) {
-//   	case 1:
-        int i=0;invert=64-invert;
-        while(i<64){bdvals[i]=(bdvals[i]+invert)%64;paint(i);i++;}
-//   		return true;}
+        nbrplayers=3-nbrplayers;
+        btnRefresh.setText("START");
+        if(nbrplayers==1){status.setText("solitaire");}
         return true;
     }
 }
+
